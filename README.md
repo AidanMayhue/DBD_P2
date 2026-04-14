@@ -1,1 +1,1 @@
-#Magic the Gathering Deck Evaluation Tool
+# Magic the Gathering Deck Evaluation Tool
