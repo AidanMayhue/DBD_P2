@@ -8,11 +8,11 @@
 
 **DOI**:
 
-**Press Release**:
+**Press Release**: https://github.com/AidanMayhue/DBD_P2/blob/main/press_release.md
 
-**Pipeline**: https://github.com/AidanMayhue/DBD_P2/blob/main/press_release.md
+**Pipeline**: 
 
-**License**:
+**License**: https://github.com/AidanMayhue/DBD_P2/blob/main/LICENSE
 
 ## Problem Definition
 
