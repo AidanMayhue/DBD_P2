@@ -6,7 +6,7 @@
 
 **NetID**: xdw9vp
 
-**DOI**:
+**DOI**: https://doi.org/10.5281/zenodo.19668390
 
 **Press Release**: https://github.com/AidanMayhue/DBD_P2/blob/main/press_release.md
 
