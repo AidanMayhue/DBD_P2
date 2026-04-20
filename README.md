@@ -10,7 +10,7 @@
 
 **Press Release**:
 
-**Pipeline**:
+**Pipeline**: https://github.com/AidanMayhue/DBD_P2/blob/main/press_release.md
 
 **License**:
 
