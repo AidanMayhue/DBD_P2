@@ -654,7 +654,7 @@ if __name__ == "__main__":
 
     plot_deck_comparison(
         deck_a, deck_b, scorer,
-        deck_a_label="Burn (Deck A)",
-        deck_b_label="Jund (Deck B)",
+        deck_a_label="(Deck A)",
+        deck_b_label="(Deck B)",
         output_path="deck_comparison.png",
     )
