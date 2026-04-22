@@ -39,6 +39,8 @@ import os
 import sys
 from typing import Optional
 
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 import numpy as np
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -402,6 +404,130 @@ def _build_reasoning(
 
 
 # ---------------------------------------------------------------------------
+# Plot
+# ---------------------------------------------------------------------------
+
+def plot_deck_comparison(
+    deck_a: list[str],
+    deck_b: list[str],
+    scorer: "DeckScorer",
+    deck_a_label: str = "Deck A",
+    deck_b_label: str = "Deck B",
+    output_path: str = "deck_comparison.png",
+) -> None:
+    """
+    Horizontal bar chart of every unique card across both decklists,
+    ordered by score (highest at top). Bars are coloured by deck membership:
+        - Deck A only  → blue
+        - Deck B only  → coral
+        - In both      → purple
+
+    Parameters
+    ----------
+    deck_a, deck_b   : raw decklists (duplicates allowed — they are deduped here)
+    scorer           : fitted DeckScorer instance
+    deck_a_label     : display name for deck A
+    deck_b_label     : display name for deck B
+    output_path      : file to save the figure (PNG)
+    """
+    COLOR_A    = "#378ADD"   # blue  — Deck A
+    COLOR_B    = "#D85A30"   # coral — Deck B
+    COLOR_BOTH = "#7F77DD"   # purple — shared
+
+    # Deduplicate while preserving which deck each card belongs to
+    unique_a = set(n.strip() for n in deck_a)
+    unique_b = set(n.strip() for n in deck_b)
+    all_cards = unique_a | unique_b
+
+    # Build (card_name, score, deck_membership) rows — skip unknowns
+    rows = []
+    for name in all_cards:
+        score = scorer.score_lookup.get(name.strip().lower())
+        if score is None:
+            logger.warning("Plot: card '%s' not in lookup — skipping", name)
+            continue
+        if name in unique_a and name in unique_b:
+            membership = "both"
+        elif name in unique_a:
+            membership = "a"
+        else:
+            membership = "b"
+        rows.append((name, score, membership))
+
+    if not rows:
+        logger.error("No scoreable cards found — skipping plot.")
+        return
+
+    # Sort by score ascending so highest score is at the top of the chart
+    rows.sort(key=lambda r: r[1])
+    names      = [r[0] for r in rows]
+    scores     = [r[1] for r in rows]
+    colors     = [
+        COLOR_BOTH if r[2] == "both" else (COLOR_A if r[2] == "a" else COLOR_B)
+        for r in rows
+    ]
+
+    # Dynamic figure height — give each card ~0.32 inches of vertical space
+    fig_height = max(6, len(rows) * 0.32)
+    fig, ax    = plt.subplots(figsize=(10, fig_height))
+
+    y_pos = range(len(names))
+    bars  = ax.barh(list(y_pos), scores, color=colors, edgecolor="white", linewidth=0.4, height=0.7)
+
+    # Score labels at the end of each bar
+    for bar, score in zip(bars, scores):
+        x_offset = 0.01 if score >= 0 else -0.01
+        ha        = "left" if score >= 0 else "right"
+        ax.text(
+            bar.get_width() + x_offset,
+            bar.get_y() + bar.get_height() / 2,
+            f"{score:.3f}",
+            va="center", ha=ha,
+            fontsize=7.5,
+            color="#444441",
+        )
+
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(names, fontsize=8.5)
+    ax.set_xlabel("Card score (normalised)", fontsize=10)
+    ax.set_title("Card scores by deck", fontsize=12, fontweight="medium", pad=12)
+
+    # Zero reference line
+    ax.axvline(0, color="#B4B2A9", linewidth=0.8, linestyle="--")
+
+    # Legend
+    legend_handles = [
+        mpatches.Patch(color=COLOR_A,    label=deck_a_label),
+        mpatches.Patch(color=COLOR_B,    label=deck_b_label),
+        mpatches.Patch(color=COLOR_BOTH, label="In both decks"),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="lower right",
+        fontsize=9,
+        framealpha=0.9,
+        edgecolor="#D3D1C7",
+    )
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#D3D1C7")
+    ax.spines["bottom"].set_color("#D3D1C7")
+    ax.tick_params(colors="#5F5E5A")
+    ax.set_facecolor("#FAFAFA")
+    fig.patch.set_facecolor("white")
+
+    plt.tight_layout()
+    try:
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        logger.info("Plot saved -> %s", output_path)
+    except Exception as exc:
+        logger.error("Failed to save plot: %s", exc)
+    finally:
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -416,59 +542,66 @@ if __name__ == "__main__":
         logger.critical("Failed to initialise DeckScorer: %s", exc)
         sys.exit(1)
 
-    # These are sample decklists of Dimir Excrutiator and Mono Green Landfall. Both are in the standard meta. 
-    # Swap them out with other decklists!
+   # These are sample decklists of Dimir Excrutiator and Mono Green Landfall. Both are in the standard meta.
+   # Swap them out with other decklists!
     deck_a = [
-        # Creatures (12)
-        "Superior Spider-Man", "Superior Spider-Man", "Superior Spider-Man", "Superior Spider-Man",
-        "Deceit", "Deceit", "Deceit", "Deceit",
-        "Doomsday Excruciator", "Doomsday Excruciator", "Doomsday Excruciator", "Doomsday Excruciator",
+       # Creatures (12)
+       "Superior Spider-Man", "Superior Spider-Man", "Superior Spider-Man", "Superior Spider-Man",
+       "Deceit", "Deceit", "Deceit", "Deceit",
+       "Doomsday Excruciator", "Doomsday Excruciator", "Doomsday Excruciator", "Doomsday Excruciator",
 
-        # Spells (22)
-        "Duress", "Duress", "Duress",
-        "Insatiable Avarice", "Insatiable Avarice",
-        "Requiting Hex", "Requiting Hex", "Requiting Hex", "Requiting Hex",
-        "Bitter Triumph", "Bitter Triumph", "Bitter Triumph", "Bitter Triumph",
-        "Day of Black Sun", "Day of Black Sun", "Day of Black Sun",
-        "Stock Up", "Stock Up", "Stock Up",
-        "Winternight Stories", "Winternight Stories",
-        "Deadly Cover-Up",
 
-        # Lands (26)
-        "Cavern of Souls", "Cavern of Souls",
-        "Gloomlake Verge", "Gloomlake Verge", "Gloomlake Verge", "Gloomlake Verge",
-        "Restless Reef", "Restless Reef", "Restless Reef", "Restless Reef",
-        "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
-        "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
-        "Undercity Sewers", "Undercity Sewers",
-        "Watery Grave", "Watery Grave", "Watery Grave", "Watery Grave",
-    ]
+       # Spells (22)
+       "Duress", "Duress", "Duress",
+       "Insatiable Avarice", "Insatiable Avarice",
+       "Requiting Hex", "Requiting Hex", "Requiting Hex", "Requiting Hex",
+       "Bitter Triumph", "Bitter Triumph", "Bitter Triumph", "Bitter Triumph",
+       "Day of Black Sun", "Day of Black Sun", "Day of Black Sun",
+       "Stock Up", "Stock Up", "Stock Up",
+       "Winternight Stories", "Winternight Stories",
+       "Deadly Cover-Up",
+
+
+       # Lands (26)
+       "Cavern of Souls", "Cavern of Souls",
+       "Gloomlake Verge", "Gloomlake Verge", "Gloomlake Verge", "Gloomlake Verge",
+       "Restless Reef", "Restless Reef", "Restless Reef", "Restless Reef",
+       "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
+       "Swamp", "Swamp", "Swamp", "Swamp", "Swamp",
+       "Undercity Sewers", "Undercity Sewers",
+       "Watery Grave", "Watery Grave", "Watery Grave", "Watery Grave",
+   ]
+
 
     deck_b = [
-        # Creatures (24)
-        "Llanowar Elves", "Llanowar Elves", "Llanowar Elves", "Llanowar Elves",
-        "Sazh's Chocobo", "Sazh's Chocobo", "Sazh's Chocobo", "Sazh's Chocobo",
-        "Badgermole Cub", "Badgermole Cub", "Badgermole Cub", "Badgermole Cub",
-        "Mossborn Hydra", "Mossborn Hydra", "Mossborn Hydra",
-        "Surrak, Elusive Hunter",
-        "Icetill Explorer", "Icetill Explorer", "Icetill Explorer", "Icetill Explorer",
-        "Mightform Harmonizer", "Mightform Harmonizer", "Mightform Harmonizer", "Mightform Harmonizer",
+       # Creatures (24)
+       "Llanowar Elves", "Llanowar Elves", "Llanowar Elves", "Llanowar Elves",
+       "Sazh's Chocobo", "Sazh's Chocobo", "Sazh's Chocobo", "Sazh's Chocobo",
+       "Badgermole Cub", "Badgermole Cub", "Badgermole Cub", "Badgermole Cub",
+       "Mossborn Hydra", "Mossborn Hydra", "Mossborn Hydra",
+       "Surrak, Elusive Hunter",
+       "Icetill Explorer", "Icetill Explorer", "Icetill Explorer", "Icetill Explorer",
+       "Mightform Harmonizer", "Mightform Harmonizer", "Mightform Harmonizer", "Mightform Harmonizer",
 
-        # Spells (4)
-        "Royal Treatment", "Royal Treatment", "Royal Treatment", "Royal Treatment",
 
-        # Enchantments (6)
-        "Meltstrider's Resolve", "Meltstrider's Resolve",
-        "Earthbender Ascension", "Earthbender Ascension", "Earthbender Ascension", "Earthbender Ascension",
+       # Spells (4)
+       "Royal Treatment", "Royal Treatment", "Royal Treatment", "Royal Treatment",
 
-        # Lands (26)
-        "Ba Sing Se", "Ba Sing Se", "Ba Sing Se",
-        "Escape Tunnel", "Escape Tunnel", "Escape Tunnel", "Escape Tunnel",
-        "Fabled Passage", "Fabled Passage", "Fabled Passage", "Fabled Passage",
-        "Forest", "Forest", "Forest", "Forest", "Forest", "Forest", "Forest",
-        "Forest", "Forest", "Forest", "Forest", "Forest", "Forest",
-        "Promising Vein", "Promising Vein",
+
+       # Enchantments (6)
+       "Meltstrider's Resolve", "Meltstrider's Resolve",
+       "Earthbender Ascension", "Earthbender Ascension", "Earthbender Ascension", "Earthbender Ascension",
+
+
+       # Lands (26)
+       "Ba Sing Se", "Ba Sing Se", "Ba Sing Se",
+       "Escape Tunnel", "Escape Tunnel", "Escape Tunnel", "Escape Tunnel",
+       "Fabled Passage", "Fabled Passage", "Fabled Passage", "Fabled Passage",
+       "Forest", "Forest", "Forest", "Forest", "Forest", "Forest", "Forest",
+       "Forest", "Forest", "Forest", "Forest", "Forest", "Forest",
+       "Promising Vein", "Promising Vein",
 ]
+
 
     try:
         result = scorer.compare(deck_a, deck_b)
@@ -488,3 +621,10 @@ if __name__ == "__main__":
     print("\n  Reasoning:")
     for r in result["reasoning"]:
         print(f"    - {r}")
+
+    plot_deck_comparison(
+        deck_a, deck_b, scorer,
+        deck_a_label="Burn (Deck A)",
+        deck_b_label="Jund (Deck B)",
+        output_path="deck_comparison.png",
+    )

@@ -46,7 +46,6 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
 from sklearn.preprocessing import StandardScaler
 
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -131,7 +130,17 @@ def get_collection():
 
 
 def load_cards(collection) -> list[dict]:
-    """Fetch only scoring-relevant fields for all Standard-legal cards."""
+    """
+    Fetch Standard-legal cards and deduplicate to one document per unique
+    card name — keeping the cheapest printing by USD price.
+
+    Why: cards like Island have 900+ printings ranging from $0.01 to $5.
+    Using the mean would inflate the price signal for heavily-reprinted cards.
+    The cheapest printing best represents the floor cost of including a card.
+
+    Cards with no USD price are treated as $0 so they are never preferred
+    over a card that does have a price.
+    """
     projection = {
         "name":       1,
         "cmc":        1,
@@ -143,15 +152,36 @@ def load_cards(collection) -> list[dict]:
     }
     logger.info("Loading Standard-legal cards from MongoDB...")
     try:
-        cards = list(collection.find({"legalities.standard": "legal"}, projection))
-        logger.info("Loaded %d cards", len(cards))
-        return cards
+        all_cards = list(collection.find({"legalities.standard": "legal"}, projection))
+        logger.info("Loaded %d printings from MongoDB", len(all_cards))
     except OperationFailure as exc:
         logger.error("MongoDB query failed: %s", exc)
         raise
     except Exception as exc:
         logger.error("Unexpected error loading cards: %s", exc)
         raise
+
+    # Group by lowercase name, keep the printing with the lowest USD price
+    cheapest: dict[str, tuple] = {}
+    for card in all_cards:
+        name = card.get("name", "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        try:
+            price = float(card.get("prices", {}).get("usd") or 0.0)
+        except (TypeError, ValueError):
+            price = 0.0
+
+        if key not in cheapest or price < cheapest[key][1]:
+            cheapest[key] = (card, price)
+
+    unique_cards = [doc for doc, _ in cheapest.values()]
+    logger.info(
+        "Deduplicated to %d unique card names (cheapest printing kept)",
+        len(unique_cards),
+    )
+    return unique_cards
 
 # ---------------------------------------------------------------------------
 # Feature extraction
