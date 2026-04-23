@@ -44,9 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -91,9 +89,17 @@ MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "cards")
 
 RARITY_MAP = {"common": 1, "uncommon": 2, "rare": 3, "mythic": 4, "special": 3}
 
-# Ordered list of features fed into PCA.
-# PCA will learn the weights from the card pool data itself.
-FEATURE_NAMES = ["cmc", "price_usd", "price_usd_foil", "power", "toughness", "rarity_score"]
+# Feature weights — edit these to change scoring priorities.
+# Negative CMC weight: lower mana curve = higher score.
+# All other weights are positive: more = better.
+FEATURE_WEIGHTS = {
+    "cmc":            -0.20,   # lower curve is stronger
+    "price_usd":       0.30,   # expensive cards are generally better
+    "price_usd_foil":  0.10,   # secondary price signal
+    "power":           0.20,   # combat stats matter
+    "toughness":       0.10,   # survivability
+    "rarity_score":    0.10,   # rarer = more impactful on average
+}
 
 # How aggressively the sigmoid converts score difference to probability.
 # Higher = more decisive predictions. Lower = closer to 50/50.
@@ -221,67 +227,40 @@ class DeckScorer:
 
     def _build_lookup(self, cards: list[dict]) -> None:
         """
-        Derive feature weights from the card pool using PCA, then score
-        every card as its projection onto PC1 (the direction of maximum
-        variance across all cards).
-
-        Why PC1?
-        PC1 captures the single axis along which cards differ the most.
-        In a card pool where price, rarity, power, and toughness all tend
-        to move together for strong cards, PC1 naturally points in the
-        direction of overall card quality — without any hand-tuned numbers.
-
-        The loadings (eigenvector coefficients) become the weights.
-        A negative loading on CMC means high-CMC cards score lower, which
-        matches the intuition that cheaper-to-cast cards are more flexible.
-        If PC1 ends up pointing the wrong way (i.e. expensive cards score
-        low), we flip the sign so that higher score always means stronger.
+        Normalise features across the full card pool, apply weights,
+        then store a mean score per card name.
         """
-        # Build normalised feature matrix
+        feature_names = list(FEATURE_WEIGHTS.keys())
+        weights       = np.array([FEATURE_WEIGHTS[f] for f in feature_names])
+
+        # Build feature matrix
         matrix = np.array([
-            [extract_features(doc)[f] for f in FEATURE_NAMES]
+            [extract_features(doc)[f] for f in feature_names]
             for doc in cards
         ], dtype=float)
 
+        # Normalise so each feature contributes on the same scale
         scaler = StandardScaler()
         normed = scaler.fit_transform(matrix)
 
-        # Fit PCA and extract PC1 loadings as weights
-        pca = PCA(n_components=len(FEATURE_NAMES))
-        pca.fit(normed)
-        weights = pca.components_[0]   # shape: (n_features,)
-
-        # Convention: ensure price_usd loading is positive so that
-        # more expensive cards score higher (flip entire vector if not)
-        price_idx = FEATURE_NAMES.index("price_usd")
-        if weights[price_idx] < 0:
-            weights = -weights
-            logger.debug("PC1 sign flipped so that price_usd loading is positive")
-
-        logger.info(
-            "PCA weights (PC1 explains %.1f%% of variance): %s",
-            pca.explained_variance_ratio_[0] * 100,
-            {f: round(float(w), 4) for f, w in zip(FEATURE_NAMES, weights)},
-        )
-
-        # Card score = projection onto PC1
+        # Weighted sum -> raw card scores
         raw_scores = normed @ weights
 
-        # Build name -> score lookup (one entry per unique card name)
-        lookup: dict[str, float] = {}
+        # Group by name (lowercase) and average across printings
+        lookup: dict[str, list[float]] = {}
         for doc, score in zip(cards, raw_scores):
             name = doc.get("name", "").strip().lower()
             if name:
-                lookup[name] = float(score)
+                lookup.setdefault(name, []).append(float(score))
 
-        self.score_lookup: dict[str, float] = lookup
+        self.score_lookup: dict[str, float] = {
+            name: float(np.mean(vals)) for name, vals in lookup.items()
+        }
 
-        # Store for external use (plot, logging)
+        # Also store per-feature normalised means for breakdown reporting
         self._scaler        = scaler
-        self._pca           = pca
+        self._feature_names = feature_names
         self._weights       = weights
-        self._feature_names = FEATURE_NAMES
-        self._explained_variance = pca.explained_variance_ratio_
 
     @classmethod
     def from_mongo(cls) -> "DeckScorer":
@@ -457,106 +436,6 @@ def _build_reasoning(
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
-
-def plot_feature_weights(
-    scorer: "DeckScorer",
-    output_path: str = "feature_weights.png",
-) -> None:
-    """
-    Two-panel chart showing:
-      Left  — PC1 loadings (the weights used to score each card), as a
-              horizontal bar chart. Positive = feature raises score,
-              negative = feature lowers score.
-      Right — Explained variance ratio across all principal components,
-              showing how much of the card-pool variance each PC captures.
-              The bar for PC1 is highlighted since that is the one we use.
-    """
-    weights   = scorer._weights
-    feat_names = scorer._feature_names
-    ev_ratio  = scorer._explained_variance
-
-    # Friendly display names
-    label_map = {
-        "cmc":            "CMC",
-        "price_usd":      "Price (USD)",
-        "price_usd_foil": "Foil price (USD)",
-        "power":          "Power",
-        "toughness":      "Toughness",
-        "rarity_score":   "Rarity",
-    }
-    labels = [label_map.get(f, f) for f in feat_names]
-
-    # Sort loadings for the bar chart (largest absolute value at top)
-    order   = np.argsort(np.abs(weights))
-    s_labels  = [labels[i] for i in order]
-    s_weights = weights[order]
-    bar_colors = ["#378ADD" if w >= 0 else "#D85A30" for w in s_weights]
-
-    fig, (ax_load, ax_var) = plt.subplots(1, 2, figsize=(12, 5))
-
-    # ── Left panel: PC1 loadings ──────────────────────────────────────────
-    bars = ax_load.barh(
-        s_labels, s_weights,
-        color=bar_colors, edgecolor="white", linewidth=0.4, height=0.6,
-    )
-    for bar, val in zip(bars, s_weights):
-        offset = 0.005 if val >= 0 else -0.005
-        ha     = "left" if val >= 0 else "right"
-        ax_load.text(
-            bar.get_width() + offset,
-            bar.get_y() + bar.get_height() / 2,
-            f"{val:+.4f}",
-            va="center", ha=ha, fontsize=8.5, color="#444441",
-        )
-
-    ax_load.axvline(0, color="#B4B2A9", linewidth=0.8, linestyle="--")
-    ax_load.set_xlabel("PC1 loading (weight)", fontsize=10)
-    ax_load.set_title("Feature weights from PCA", fontsize=11, fontweight="medium", pad=10)
-
-    pos_patch = mpatches.Patch(color="#378ADD", label="Raises card score")
-    neg_patch = mpatches.Patch(color="#D85A30", label="Lowers card score")
-    ax_load.legend(handles=[pos_patch, neg_patch], fontsize=8.5,
-                   framealpha=0.9, edgecolor="#D3D1C7")
-
-    # ── Right panel: explained variance ──────────────────────────────────
-    n_components = len(ev_ratio)
-    pc_labels    = [f"PC{i+1}" for i in range(n_components)]
-    ev_colors    = ["#7F77DD" if i == 0 else "#D3D1C7" for i in range(n_components)]
-
-    ax_var.bar(pc_labels, ev_ratio * 100, color=ev_colors,
-               edgecolor="white", linewidth=0.4)
-    for i, v in enumerate(ev_ratio * 100):
-        ax_var.text(i, v + 0.4, f"{v:.1f}%", ha="center",
-                    fontsize=8, color="#444441")
-
-    ax_var.set_ylabel("Explained variance (%)", fontsize=10)
-    ax_var.set_title("Variance explained by each PC", fontsize=11, fontweight="medium", pad=10)
-    ax_var.set_ylim(0, max(ev_ratio * 100) * 1.15)
-
-    pc1_patch = mpatches.Patch(color="#7F77DD", label="PC1 — used for scoring")
-    ax_var.legend(handles=[pc1_patch], fontsize=8.5,
-                  framealpha=0.9, edgecolor="#D3D1C7")
-
-    # ── Shared styling ────────────────────────────────────────────────────
-    for ax in (ax_load, ax_var):
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_color("#D3D1C7")
-        ax.spines["bottom"].set_color("#D3D1C7")
-        ax.tick_params(colors="#5F5E5A")
-        ax.set_facecolor("#FAFAFA")
-
-    fig.patch.set_facecolor("white")
-    plt.tight_layout(pad=2.0)
-
-    try:
-        plt.savefig(output_path, dpi=150, bbox_inches="tight")
-        logger.info("Feature weights plot saved -> %s", output_path)
-    except Exception as exc:
-        logger.error("Failed to save feature weights plot: %s", exc)
-    finally:
-        plt.close(fig)
-
 
 def plot_deck_comparison(
     deck_a: list[str],
@@ -753,6 +632,7 @@ if __name__ == "__main__":
        "Promising Vein", "Promising Vein",
 ]
 
+
     try:
         result = scorer.compare(deck_a, deck_b)
     except Exception as exc:
@@ -772,11 +652,9 @@ if __name__ == "__main__":
     for r in result["reasoning"]:
         print(f"    - {r}")
 
-    plot_feature_weights(scorer, output_path="feature_weights.png")
-
     plot_deck_comparison(
         deck_a, deck_b, scorer,
-        deck_a_label="Burn (Deck A)",
-        deck_b_label="Jund (Deck B)",
+        deck_a_label="(Deck A)",
+        deck_b_label="(Deck B)",
         output_path="deck_comparison.png",
     )
