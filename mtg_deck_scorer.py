@@ -776,7 +776,7 @@ if __name__ == "__main__":
 
     plot_deck_comparison(
         deck_a, deck_b, scorer,
-        deck_a_label="Burn (Deck A)",
-        deck_b_label="Jund (Deck B)",
+        deck_a_label="Dimir Excrutiator (Deck A)",
+        deck_b_label="Mono Green Landfall (Deck B)",
         output_path="deck_comparison.png",
     )
