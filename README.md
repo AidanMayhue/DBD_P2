@@ -12,7 +12,10 @@
 
 **Pipeline**: https://github.com/AidanMayhue/DBD_P2/blob/main/mtg_deck_scorer.py
 
-**License**: https://github.com/AidanMayhue/DBD_P2/blob/main/LICENSE
+**License**: 
+
+MIT
+https://github.com/AidanMayhue/DBD_P2/blob/main/LICENSE
 
 ## Problem Definition
 
