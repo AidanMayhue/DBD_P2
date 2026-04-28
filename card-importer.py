@@ -33,7 +33,7 @@ from pymongo.errors import BulkWriteError, ConnectionFailure, OperationFailure
 load_dotenv()
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
-
+# Configures a root logger with a consistent format, console output, and optional
 def setup_logging() -> logging.Logger:
     """Configure root logger with console + optional rotating file handler."""
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -100,7 +100,7 @@ def build_http_session() -> requests.Session:
 
 
 # ── Scryfall helpers ──────────────────────────────────────────────────────────
-
+#These access the scryfall API, a website that has info on magic card data
 def get_bulk_download_url(session: requests.Session) -> str:
     """Fetch the download URL for the latest 'default_cards' bulk export."""
     log.info("Fetching Scryfall bulk data index from %s", SCRYFALL_BULK_URL)
@@ -136,7 +136,7 @@ def get_bulk_download_url(session: requests.Session) -> str:
 
     raise ValueError("'default_cards' bulk export not found in Scryfall response.")
 
-
+#downloads card data, filters by those that are standard legal (cards from 2024 to the current day, will reset next year)
 def download_cards(url: str, session: requests.Session) -> list:
     """Stream-download the bulk JSON and return all Standard-legal cards."""
     log.info("Downloading bulk card data from %s", url)
@@ -192,7 +192,7 @@ def download_cards(url: str, session: requests.Session) -> list:
 
 
 # ── Document builder ──────────────────────────────────────────────────────────
-
+#builds a document for each card, extracting features useful for this project and inserting into mongo db.
 def build_document(card: dict):
     """
     Extract and structure the fields most useful for win-probability modelling.
@@ -264,7 +264,7 @@ def build_document(card: dict):
 
 
 # ── MongoDB helpers ───────────────────────────────────────────────────────────
-
+#Hanldes connection to mongo db and inserting documents in batches.
 def connect_to_mongo():
     """Connect to MongoDB Atlas and verify the connection with a ping."""
     log.info("Connecting to MongoDB at ...%s", MONGO_URI.split("@")[-1])
@@ -286,7 +286,7 @@ def connect_to_mongo():
     log.info("Connected -> %s.%s", MONGO_DB, MONGO_COLLECTION)
     return client, collection
 
-
+#uploads to mongo in batches.
 def upsert_to_mongo(documents: list, collection) -> dict:
     """
     Upsert documents in batches. Returns a summary dict with counts.
@@ -357,7 +357,7 @@ def upsert_to_mongo(documents: list, collection) -> dict:
     )
     return summary
 
-
+#creates indexes for common querry patterns
 def create_indexes(collection) -> None:
     """Create indexes for common query patterns. Skips indexes that already exist."""
     indexes = [
@@ -387,7 +387,7 @@ def create_indexes(collection) -> None:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
-
+#main function to run the full pipeline.
 def main() -> int:
     """
     Run the full pipeline. Returns 0 on success, 1 on fatal error.

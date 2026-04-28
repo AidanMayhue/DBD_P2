@@ -51,7 +51,7 @@ from sklearn.preprocessing import StandardScaler
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-
+#sets up loggin with file logging and console logging.
 def setup_logging() -> logging.Logger:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     log_file  = os.getenv("LOG_FILE")
@@ -84,7 +84,7 @@ logger = setup_logging()
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-
+#connection strings for mongo database
 MONGO_URI        = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
 MONGO_DB         = os.getenv("MONGO_DB", "mtg")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "cards")
@@ -102,7 +102,7 @@ SIGMOID_SCALE = 2.0
 # ---------------------------------------------------------------------------
 # MongoDB helpers
 # ---------------------------------------------------------------------------
-
+#accesses mongo db for collections.
 def get_collection():
     logger.info("Connecting to MongoDB...")
     try:
@@ -122,7 +122,7 @@ def get_collection():
         logger.critical("Unexpected MongoDB connection error: %s", exc)
         raise
 
-
+#loads cards and deduplicates them, keeping the cheapest variant.
 def load_cards(collection) -> list[dict]:
     """
     Fetch Standard-legal cards and deduplicate to one document per unique
@@ -180,14 +180,14 @@ def load_cards(collection) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Feature extraction
 # ---------------------------------------------------------------------------
-
+#Extracts numeric features from the raw MongoDB document for each card. Handles missing or malformed data gracefully by defaulting to 0.
 def _safe_float(value, default: float = 0.0) -> float:
     try:
         return float(value) if value is not None else default
     except (TypeError, ValueError):
         return default
 
-
+# Extracts numeric features from the raw MongoDB document for each card. Handles missing or malformed data gracefully by defaulting to 0.
 def extract_features(doc: dict) -> dict[str, float]:
     """Extract raw numeric features from a single MongoDB card document."""
     rarity_str = str((doc.get("raw") or {}).get("rarity", "")).lower()
@@ -209,7 +209,7 @@ class DeckScorer:
     Scores decklists using a weighted combination of card features.
     No training data required.
     """
-
+# Initializes the DeckScorer by building a PCA-based scoring lookup from the card pool.
     def __init__(self, cards: list[dict]):
         if not cards:
             raise ValueError("Card list is empty.")
@@ -218,7 +218,7 @@ class DeckScorer:
         logger.info(
             "DeckScorer ready — %d unique card names", len(self.score_lookup)
         )
-
+# Builds the card name -> score lookup using PCA on the card features.
     def _build_lookup(self, cards: list[dict]) -> None:
         """
         Derive feature weights from the card pool using PCA, then score
@@ -282,7 +282,7 @@ class DeckScorer:
         self._weights       = weights
         self._feature_names = FEATURE_NAMES
         self._explained_variance = pca.explained_variance_ratio_
-
+# Factory method to create a DeckScorer instance from MongoDB data.
     @classmethod
     def from_mongo(cls) -> "DeckScorer":
         client, collection = get_collection()
@@ -292,13 +292,13 @@ class DeckScorer:
             client.close()
             logger.debug("MongoDB connection closed.")
         return cls(cards)
-
+# Internal method to look up a card's score by name, with logging for missing cards.
     def _lookup(self, card_name: str) -> Optional[float]:
         score = self.score_lookup.get(card_name.strip().lower())
         if score is None:
             logger.warning("Card not found: '%s' — skipping", card_name)
         return score
-
+# Compute aggregate stats for a decklist and return them in a dict.
     def score_deck(self, decklist: list[str]) -> dict:
         """
         Compute aggregate stats for a decklist.
@@ -326,11 +326,11 @@ class DeckScorer:
             "deck_size":    len(scores),
             "missing":      missing,
         }
-
+# Map score difference to (0, 1) probability using a sigmoid function.
     def _sigmoid(self, x: float) -> float:
         """Map score difference to (0, 1) probability."""
         return 1.0 / (1.0 + np.exp(-SIGMOID_SCALE * x))
-
+# Compare two decklists and return win probabilities + explanations.
     def compare(self, deck_a: list[str], deck_b: list[str]) -> dict:
         """
         Compare two decklists and return win probabilities + explanations.
@@ -389,7 +389,7 @@ class DeckScorer:
 # ---------------------------------------------------------------------------
 # Reasoning builder
 # ---------------------------------------------------------------------------
-
+# Helper function to compute average feature value across a decklist, with logging for missing cards.
 def _avg_feature(decklist: list[str], feature: str, scorer: DeckScorer) -> float:
     """Compute the average raw (un-normalised) feature value across a decklist."""
     vals = []
@@ -400,7 +400,7 @@ def _avg_feature(decklist: list[str], feature: str, scorer: DeckScorer) -> float
         # as a proxy. For richer breakdowns, extend DeckScorer to cache raw features.
     return float(np.mean(vals)) if vals else 0.0
 
-
+# Build a list of plain-English factors explaining the prediction, based on the deck stats and scorer insights.
 def _build_reasoning(
     deck_a: list[str],
     deck_b: list[str],
@@ -457,7 +457,7 @@ def _build_reasoning(
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
-
+# Two-panel chart showing feature weights and explained variance from PCA.
 def plot_feature_weights(
     scorer: "DeckScorer",
     output_path: str = "feature_weights.png",
@@ -557,7 +557,7 @@ def plot_feature_weights(
     finally:
         plt.close(fig)
 
-
+# Horizontal bar chart of every unique card across both decklists, coloured by deck membership and ordered by score.
 def plot_deck_comparison(
     deck_a: list[str],
     deck_b: list[str],
