@@ -1,6 +1,6 @@
 # DS 4320 Project 2: Magic the Gathering Deck Evaluation Tool
 
-**Executive Summary**:
+**Executive Summary**: This readme documents a Magic the Gathering secondary dataset for DS 4320 Data By Design. This project includes completed project metadata such as a name, computing ID, DOI, analysis code links, and a license. A summary table is included additionally. A problem statement, rationale, references, terminology table, and code are also included.
 
 **Name**: Aidan Mayhue
 
@@ -30,6 +30,10 @@ The general problem is describing some kind of method to predict the outcome of 
 
 
 **headline**
+
+New Magic The Gathering Win Probability Calculator
+
+https://github.com/AidanMayhue/DBD_P2/blob/main/press_release.md
 
 ## Domain Exposition
 
