@@ -96,10 +96,16 @@ A way to mitigate this is to exclude these alternative art cards. By selecting t
 
 **Implicit Schema**
 
+<img width="1534" height="1296" alt="image" src="https://github.com/user-attachments/assets/ab14da5e-b93f-4a2a-97ac-742278f78c56" />
 
 
 **Data Summary**
 
+This database contains information about individual cards. Each entry represents a card.
+
+Cards are placed into a nested file structure like so. This database uses an embedding strategy for its data.
+
+<img width="2712" height="1022" alt="image" src="https://github.com/user-attachments/assets/3a656675-6db3-44fe-bb08-1aa17406538e" />
 
 
 **Data Dictionary**
